@@ -27,6 +27,7 @@ class AppActivity : AppCompatActivity(R.layout.activity_app) {
 
     @Inject
     lateinit var repository: PostRepository
+
     @Inject
     lateinit var auth: AppAuth
 
