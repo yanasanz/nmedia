@@ -5,18 +5,21 @@ import androidx.core.net.toFile
 import androidx.lifecycle.*
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import androidx.paging.insertSeparators
+import androidx.paging.map
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import ru.netology.nmedia.auth.AppAuth
-import ru.netology.nmedia.dto.MediaUpload
-import ru.netology.nmedia.dto.Post
+import ru.netology.nmedia.dto.*
 import ru.netology.nmedia.model.FeedModelState
 import ru.netology.nmedia.model.PhotoModel
 import ru.netology.nmedia.repository.PostRepository
 import ru.netology.nmedia.util.SingleLiveEvent
+import java.time.OffsetDateTime
 import javax.inject.Inject
+import kotlin.random.Random
 
 private val empty = Post(
     id = 0,
@@ -38,8 +41,48 @@ class PostViewModel @Inject constructor(
     auth: AppAuth,
 ) : ViewModel() {
 
-    val data: Flow<PagingData<Post>> = auth.authStateFlow
-        .flatMapLatest{repository.data.cachedIn(viewModelScope)
+    private val separated: Flow<PagingData<FeedItem>> = repository
+        .data
+        .map { pagingData ->
+            pagingData.insertSeparators { before, after ->
+                if (after == null) {
+                    return@insertSeparators null
+                }
+                if (before == null) {
+                    return@insertSeparators SeparatorItem(text = "Сегодня")
+                }
+                if (before.roundedDate > after.roundedDate) {
+                    if (after.roundedDate >= 1) SeparatorItem(text = "Вчера")
+                    else SeparatorItem(text = "Ранее")
+                } else {
+                    null
+                }
+            }
+        }
+
+    private val cached: Flow<PagingData<FeedItem>> = separated
+        .map { pagingData ->
+            pagingData.insertSeparators(
+                generator = { before, _ ->
+                    if (before?.id?.rem(5) != 0L) null
+                    else Ad(
+                        Random.nextLong(),
+                        "https://netology.ru",
+                        "figma.jpg"
+                    )
+                }
+            )
+        }
+        .cachedIn(viewModelScope)
+
+    val data: Flow<PagingData<FeedItem>> = auth.authStateFlow
+        .flatMapLatest { (myId, _) ->
+            cached
+                .map { pagingData ->
+                    pagingData.map { item ->
+                        if (item !is Post) item else item.copy(ownedByMe = item.authorId == myId)
+                    }
+                }
         }
 
     private val _dataState = MutableLiveData<FeedModelState>()
@@ -121,3 +164,6 @@ class PostViewModel @Inject constructor(
         TODO()
     }
 }
+
+private val Post.roundedDate: Int
+    get() = this.published.toInt() / 86400
